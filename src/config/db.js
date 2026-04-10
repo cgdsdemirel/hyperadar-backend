@@ -1,0 +1,35 @@
+'use strict';
+
+const { Pool } = require('pg');
+const logger   = require('../utils/logger');
+
+/**
+ * Production-ready connection pool.
+ *
+ * Production (NODE_ENV=production):
+ *   - SSL enabled with rejectUnauthorized: false (required for Supabase pooler)
+ *   - Use the Supabase Transaction Mode pooler URL (port 6543), never direct
+ *
+ * Development:
+ *   - SSL disabled
+ *   - Uses local DATABASE_URL from .env
+ */
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max:                    10,   // max connections in pool
+  idleTimeoutMillis:   30000,   // close idle connections after 30s
+  connectionTimeoutMillis: 2000, // fail fast if pool is exhausted
+  ssl: process.env.NODE_ENV === 'production'
+    ? { rejectUnauthorized: false }
+    : false,
+});
+
+pool.on('error', (err) => {
+  logger.error('[DB] Unexpected database pool error', err);
+});
+
+pool.on('connect', () => {
+  logger.debug('[DB] New client connected to pool');
+});
+
+module.exports = pool;

@@ -1,0 +1,29 @@
+{
+  "name": "hyperadar-backend",
+  "version": "0.2.0",
+  "description": "HypeRadar — AI-powered trend intelligence platform (backend)",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "pipeline": "node -e \"require('./src/pipeline/pipeline').runPipeline().then(r => { console.log(r); process.exit(0); }).catch(e => { console.error(e); process.exit(1); })\""
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@sentry/node": "^10.48.0",
+    "axios": "^1.7.2",
+    "bcrypt": "^5.1.1",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.3.1",
+    "google-auth-library": "^9.11.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3",
+    "pg": "^8.11.5",
+    "rss-parser": "^3.13.0",
+    "uuid": "^9.0.1"
+  }
+}
