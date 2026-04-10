@@ -1,5 +1,10 @@
 'use strict';
 
+// ─── Node.js 18 polyfill — undici requires File to be a global ───────────────
+// Remove once Railway defaults to Node 20+
+const { File } = require('buffer');
+global.File = File;
+
 // ─── Startup confirmation — appears immediately in Railway logs ───────────────
 console.log('[boot] HypeRadar process starting...');
 console.log('[boot] Node version:', process.version);
