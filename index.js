@@ -1,19 +1,43 @@
 'use strict';
 
-// ─── Sentry must be initialized before any other imports ─────────────────────
+// ─── Startup confirmation — appears immediately in Railway logs ───────────────
+console.log('[boot] HypeRadar process starting...');
+console.log('[boot] Node version:', process.version);
+console.log('[boot] NODE_ENV:', process.env.NODE_ENV || 'development');
+
+// ─── Catch anything that crashes before we set up proper error handling ───────
+process.on('uncaughtException', (err) => {
+  console.error('[boot] UNCAUGHT EXCEPTION:', err.message);
+  console.error(err.stack);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[boot] UNHANDLED REJECTION:', reason);
+  process.exit(1);
+});
+
+// ─── Load env ─────────────────────────────────────────────────────────────────
 require('dotenv').config();
 
+// ─── Sentry (no-op if SENTRY_DSN is not set) ─────────────────────────────────
 const Sentry = require('@sentry/node');
 
 Sentry.init({
-  dsn:              process.env.SENTRY_DSN,   // no-op if undefined
+  dsn:              process.env.SENTRY_DSN,
   environment:      process.env.NODE_ENV || 'development',
   tracesSampleRate: 0.1,
 });
 
-// ─── Validate env vars — crashes fast with a clear message if missing ─────────
+// ─── Validate env vars — warn but do NOT crash so /health always responds ─────
 const { validateEnv } = require('./src/config/env');
-validateEnv();
+try {
+  validateEnv();
+  console.log('[boot] Environment validation passed');
+} catch (err) {
+  console.error('[boot] Environment validation failed:', err.message);
+  console.error('[boot] Server will start but some features will not work until env vars are set');
+}
 
 // ─── Core imports ─────────────────────────────────────────────────────────────
 const express = require('express');
@@ -31,6 +55,24 @@ const { AdService }     = require('./src/services/AdService');
 const { IAPService }    = require('./src/services/IAPService');
 const { startCron }     = require('./src/pipeline/cron');
 
+console.log('[boot] All modules loaded');
+
+// ─── Express app ──────────────────────────────────────────────────────────────
+
+const app = express();
+
+// Trust Railway proxy so rate limiting uses real client IPs
+app.set('trust proxy', 1);
+
+// ── Health check — registered FIRST, before rate limiter, before everything ───
+// Railway probes this endpoint to determine if the service is healthy.
+// It must never be blocked by rate limiting, auth, or any other middleware.
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+console.log('[boot] /health endpoint registered');
+
 // ─── CORS whitelist ───────────────────────────────────────────────────────────
 
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
@@ -39,7 +81,6 @@ const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS
 
 const corsOptions = {
   origin(origin, callback) {
-    // Allow requests with no origin (mobile apps, curl, server-to-server)
     if (!origin) return callback(null, true);
     if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
     logger.warn(`[CORS] Blocked origin: ${origin}`);
@@ -50,30 +91,11 @@ const corsOptions = {
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 
-// ─── Service instances ────────────────────────────────────────────────────────
+// ─── Global middleware ────────────────────────────────────────────────────────
 
-const authService  = new AuthService(pool, process.env.JWT_SECRET);
-const tokenService = new TokenService(pool);
-const trendService = new TrendService(pool);
-const queryService = new QueryService(pool, tokenService, trendService);
-const adService    = new AdService(pool);
-const iapService   = new IAPService(pool);
-
-// ─── Express app ──────────────────────────────────────────────────────────────
-
-const app = express();
-
-// Trust Railway / Render / Fly proxy so rate limiting uses real client IPs
-app.set('trust proxy', 1);
-
-// Security headers
 app.use(helmet());
-
-// CORS
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // preflight
-
-// Body parsing
+app.options('*', cors(corsOptions));
 app.use(express.json());
 
 // Request logger — skip /health to keep logs clean
@@ -86,11 +108,19 @@ app.use((req, res, next) => {
   next();
 });
 
-// Global rate limiter
+// Global rate limiter (applied after /health so healthchecks are never rate-limited)
 app.use(globalLimiter);
 
-// ─── Shared app locals — accessible as req.app.locals.* in controllers ────────
+// ─── Service instances ────────────────────────────────────────────────────────
 
+const authService  = new AuthService(pool, process.env.JWT_SECRET);
+const tokenService = new TokenService(pool);
+const trendService = new TrendService(pool);
+const queryService = new QueryService(pool, tokenService, trendService);
+const adService    = new AdService(pool);
+const iapService   = new IAPService(pool);
+
+// Inject into app.locals — accessible as req.app.locals.* in controllers
 app.locals.db           = pool;
 app.locals.authService  = authService;
 app.locals.tokenService = tokenService;
@@ -108,14 +138,8 @@ app.use('/ads',    require('./src/routes/ads'));
 app.use('/tokens', require('./src/routes/iap'));
 app.use('/admin',  require('./src/routes/admin'));
 
-// Health check — no auth, no rate limit, no logs
-app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
 // ─── Error handlers ───────────────────────────────────────────────────────────
 
-// Sentry must capture before our handler sends the response
 Sentry.setupExpressErrorHandler(app);
 
 // eslint-disable-next-line no-unused-vars
@@ -132,9 +156,17 @@ app.use((err, req, res, next) => {
 
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
-const server = app.listen(PORT, () => {
+console.log(`[boot] Starting server on port ${PORT}...`);
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`[boot] Server listening on 0.0.0.0:${PORT} ✓`);
   logger.info(`HypeRadar backend listening on port ${PORT} [${process.env.NODE_ENV || 'development'}]`);
   startCron();
+});
+
+server.on('error', (err) => {
+  console.error('[boot] Server failed to start:', err.message);
+  process.exit(1);
 });
 
 // ─── Graceful shutdown ────────────────────────────────────────────────────────
@@ -152,7 +184,6 @@ function shutdown(signal) {
     process.exit(0);
   });
 
-  // Force exit if graceful shutdown takes too long
   setTimeout(() => {
     logger.error('[Shutdown] Forced exit after timeout');
     process.exit(1);
