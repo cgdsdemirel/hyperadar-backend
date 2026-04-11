@@ -23,7 +23,7 @@ pool.on('error', (err) => {
 });
 
 pool.on('connect', () => {
-  logger.debug('[DB] New client connected to pool');
+  logger.info('[DB] New client connected to pool');
 });
 
 module.exports = pool;
