@@ -106,7 +106,7 @@ async function failPipelineLog(pool, logId, errorMessage) {
  */
 async function runPipeline(db) {
   const ownDb  = !db;
-  const pool   = db || new Pool({ connectionString: process.env.DATABASE_URL });
+  const pool   = db || new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
   const trendSvc = new TrendService(pool);
 
   const startedAt  = Date.now();
