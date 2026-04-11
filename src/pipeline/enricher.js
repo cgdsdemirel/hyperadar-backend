@@ -44,8 +44,13 @@ async function callClaude(prompt) {
     messages:   [{ role: 'user', content: prompt }],
   });
 
-  const raw = message.content?.[0]?.text?.trim() || '';
-  return JSON.parse(raw); // throws on bad JSON — caller handles retry
+  const raw     = message.content?.[0]?.text?.trim() || '';
+  const cleaned = raw
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+  return JSON.parse(cleaned); // throws on bad JSON — caller handles retry
 }
 
 /**
@@ -81,9 +86,9 @@ async function enrich(rawTrend) {
       };
     } catch (err) {
       if (attempt === 1) {
-        logger.warn(`[Enricher] JSON parse failed for "${rawTrend.title}", retrying...`);
+        logger.warn(`[Enricher] Attempt 1 failed for "${rawTrend.title}" — ${err.message}, retrying...`);
       } else {
-        logger.error(`[Enricher] Both attempts failed for "${rawTrend.title}"`, err);
+        logger.error(`[Enricher] Both attempts failed for "${rawTrend.title}" — ${err.message}`, err);
       }
     }
   }
