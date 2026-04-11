@@ -6,22 +6,16 @@ const logger   = require('../utils/logger');
 /**
  * Production-ready connection pool.
  *
- * Production (NODE_ENV=production):
- *   - SSL enabled with rejectUnauthorized: false (required for Supabase pooler)
- *   - Use the Supabase Transaction Mode pooler URL (port 6543), never direct
- *
- * Development:
- *   - SSL disabled
- *   - Uses local DATABASE_URL from .env
+ * SSL enabled with rejectUnauthorized: false for all environments
+ * (required for Supabase pooler, including Railway deployments).
+ * Use the Supabase Transaction Mode pooler URL (port 6543), never direct.
  */
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max:                    10,   // max connections in pool
   idleTimeoutMillis:   30000,   // close idle connections after 30s
   connectionTimeoutMillis: 2000, // fail fast if pool is exhausted
-  ssl: process.env.NODE_ENV === 'production'
-    ? { rejectUnauthorized: false }
-    : false,
+  ssl: { rejectUnauthorized: false },
 });
 
 pool.on('error', (err) => {
