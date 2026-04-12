@@ -142,8 +142,9 @@ app.use('/query',  require('./src/routes/query'));
 app.use('/trends', require('./src/routes/trends'));   // public — no auth
 app.use('/ads',    require('./src/routes/ads'));
 app.use('/tokens', require('./src/routes/iap'));
-app.use('/admin',  require('./src/routes/admin'));
-app.use('/reports', require('./src/routes/reports'));
+app.use('/admin',    require('./src/routes/admin'));
+app.use('/reports',  require('./src/routes/reports'));
+app.use('/api-keys', require('./src/routes/api-keys'));
 
 // ─── Error handlers ───────────────────────────────────────────────────────────
 
