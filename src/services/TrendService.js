@@ -74,24 +74,25 @@ class TrendService {
   // ─────────────────────────────────────────
 
   /**
-   * Fetch the top 5 trends for the requested regions and categories.
+   * Fetch the top 5 trends for the requested regions, categories, and language.
    *
    * Deduplication: only the highest-scoring row per title is returned.
    * Fallback chain:
-   *   1. Match requested regions + categories  → up to 5 rows
+   *   1. Match requested regions + categories + lang → up to 5 rows
    *   2. If empty, retry with region = 'Global'
    *   3. If still empty, return FALLBACK_RESULT
    *
    * @param {string[]} regions    - e.g. ['Turkiye', 'Global']
    * @param {string[]} categories - e.g. ['youtube', 'reddit']
+   * @param {string}   [lang='en'] - Language filter, e.g. 'en' or 'tr'
    * @returns {Promise<object[]>}
    */
-  async getTrends(regions, categories) {
-    const rows = await this._query(regions, categories);
+  async getTrends(regions, categories, lang = 'en') {
+    const rows = await this._query(regions, categories, lang);
     if (rows.length > 0) return rows;
 
-    logger.warn(`[TrendService] No results for regions=${JSON.stringify(regions)}, falling back to Global`);
-    const globalRows = await this._query(['Global'], categories);
+    logger.warn(`[TrendService] No results for regions=${JSON.stringify(regions)} lang=${lang}, falling back to Global`);
+    const globalRows = await this._query(['Global'], categories, lang);
     if (globalRows.length > 0) return globalRows;
 
     logger.warn('[TrendService] No results even for Global — returning fallback');
@@ -102,7 +103,7 @@ class TrendService {
    * Internal query: deduplicated by title (highest score wins), ordered by score DESC.
    * @private
    */
-  async _query(regions, categories) {
+  async _query(regions, categories, lang) {
     const { rows } = await this.db.query(
       `WITH ranked AS (
          SELECT *,
@@ -113,6 +114,7 @@ class TrendService {
            FROM trends
           WHERE region   = ANY($1::varchar[])
             AND category = ANY($2::varchar[])
+            AND lang     = $3
        )
        SELECT id, title, description, category, region, lang,
               score, monetization_hint, source, created_at
@@ -120,7 +122,7 @@ class TrendService {
         WHERE rn = 1
         ORDER BY score DESC, created_at DESC
         LIMIT 5`,
-      [regions, categories]
+      [regions, categories, lang]
     );
     return rows;
   }

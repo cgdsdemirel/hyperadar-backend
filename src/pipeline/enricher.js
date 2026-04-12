@@ -13,9 +13,10 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 /**
  * Build the enrichment prompt for Claude.
  * @param {{ title, description, category, region }} trend
+ * @param {string} langInstruction - Language directive appended to the prompt
  * @returns {string}
  */
-function buildPrompt({ title, description, category, region }) {
+function buildPrompt({ title, description, category, region }, langInstruction) {
   return `You are a trend analyst. Given the following trend data, return ONLY a valid JSON object with no explanation, no markdown, no code blocks.
 
 Trend title: ${title}
@@ -29,7 +30,9 @@ Return this exact JSON structure:
   "description": "2-3 sentence summary of why this is trending",
   "score": "number between 0 and 100 indicating trend strength",
   "monetization_hint": "1-2 sentence actionable business opportunity"
-}`;
+}
+
+${langInstruction}`;
 }
 
 /**
@@ -60,11 +63,16 @@ async function callClaude(prompt) {
  * Retry policy: one automatic retry on JSON parse failure; returns null after
  * two consecutive failures so the pipeline can skip this item cleanly.
  *
- * @param {{ title, description, category, region, lang, source }} rawTrend
+ * @param {{ title, description, category, region, source }} rawTrend
+ * @param {'en'|'tr'} lang - Target language for the enriched output
  * @returns {Promise<object|null>} Enriched trend or null if both attempts fail
  */
-async function enrich(rawTrend) {
-  const prompt = buildPrompt(rawTrend);
+async function enrich(rawTrend, lang = 'en') {
+  const langInstruction = lang === 'tr'
+    ? 'Respond in Turkish. Translate all fields to Turkish.'
+    : 'Respond in English.';
+
+  const prompt = buildPrompt(rawTrend, langInstruction);
 
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
@@ -81,14 +89,14 @@ async function enrich(rawTrend) {
         // Preserve original metadata
         category:          rawTrend.category,
         region:            rawTrend.region,
-        lang:              rawTrend.lang,
+        lang,
         source:            rawTrend.source,
       };
     } catch (err) {
       if (attempt === 1) {
-        logger.warn(`[Enricher] Attempt 1 failed for "${rawTrend.title}" — ${err.message}, retrying...`);
+        logger.warn(`[Enricher] Attempt 1 failed for "${rawTrend.title}" (lang=${lang}) — ${err.message}, retrying...`);
       } else {
-        logger.error(`[Enricher] Both attempts failed for "${rawTrend.title}" — ${err.message}`, err);
+        logger.error(`[Enricher] Both attempts failed for "${rawTrend.title}" (lang=${lang}) — ${err.message}`, err);
       }
     }
   }

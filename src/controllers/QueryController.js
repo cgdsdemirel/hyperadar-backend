@@ -23,7 +23,7 @@ const {
  * Requires: authenticate middleware (req.user.id populated)
  * Requires: validateQueryInput middleware (structural validation already done)
  *
- * Body:    { regions: string[], categories: string[] }
+ * Body:    { regions: string[], categories: string[], lang?: string }
  * Success: 200 { trends, token_spent, remaining_tokens? | unlock_more? }
  *
  * Errors:
@@ -38,11 +38,11 @@ const {
  */
 async function execute(req, res, next) {
   try {
-    const userId             = req.user.id;
-    const { regions, categories } = req.body;
+    const userId                   = req.user.id;
+    const { regions, categories, lang } = req.body;
 
     const { queryService } = req.app.locals;
-    const result = await queryService.executeQuery(userId, regions, categories);
+    const result = await queryService.executeQuery(userId, regions, categories, lang);
 
     return res.status(200).json(result);
   } catch (err) {

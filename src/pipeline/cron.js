@@ -6,9 +6,9 @@ const pool   = require('../config/db');
 const { runPipeline } = require('./pipeline');
 
 /**
- * Pipeline schedule: 08:00 and 16:00 UTC every day.
+ * Pipeline schedule: 08:00 UTC every day.
  */
-const SCHEDULE  = '0 8,16 * * *';
+const SCHEDULE  = '0 8 * * *';
 
 /**
  * Keepalive heartbeat: every 5 minutes.
@@ -62,7 +62,7 @@ function startCron() {
     { timezone: 'UTC' }
   );
 
-  logger.info(`[Cron] Pipeline scheduled — next runs at 08:00 and 16:00 UTC (expression: "${SCHEDULE}")`);
+  logger.info(`[Cron] Pipeline scheduled — next run at 08:00 UTC (expression: "${SCHEDULE}")`);
 
   // ── Keepalive heartbeat ───────────────────────────────────────────────────
   cron.schedule(

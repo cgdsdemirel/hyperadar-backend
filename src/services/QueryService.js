@@ -51,9 +51,10 @@ class QueryService {
    * @param {string}   userId
    * @param {string[]} regions
    * @param {string[]} categories
+   * @param {string}   [lang='en'] - Language of trends to return ('en' or 'tr')
    * @returns {Promise<object>} Shaped query response
    */
-  async executeQuery(userId, regions, categories) {
+  async executeQuery(userId, regions, categories, lang = 'en') {
     // ── Step 1: validate input ────────────────────────────────────────────────
     this._validateInput(regions, categories);
 
@@ -76,7 +77,7 @@ class QueryService {
     }
 
     // ── Step 5: fetch trends (always from DB — no live pipeline call) ─────────
-    const allTrends = await this.trendService.getTrends(regions, categories);
+    const allTrends = await this.trendService.getTrends(regions, categories, lang);
 
     // ── Step 6: slice by plan ─────────────────────────────────────────────────
     const limit  = TREND_LIMIT[user.plan] ?? TREND_LIMIT.free;
@@ -88,7 +89,7 @@ class QueryService {
 
     logger.info(
       `[QueryService] query=${queryId} user=${userId} plan=${user.plan} ` +
-      `regions=${regions.join(',')} categories=${categories.join(',')} ` +
+      `regions=${regions.join(',')} categories=${categories.join(',')} lang=${lang} ` +
       `token_spent=${tokenSpent} trends_returned=${trends.length}`
     );
 

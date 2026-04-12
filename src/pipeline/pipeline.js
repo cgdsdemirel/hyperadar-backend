@@ -137,9 +137,16 @@ async function runPipeline(db) {
           const enriched = [];
 
           for (const item of slice) {
-            const result = await enrich(item);
-            if (result) {
-              enriched.push(result);
+            const enResult = await enrich(item, 'en');
+            if (enResult) {
+              enriched.push(enResult);
+            } else {
+              totalSkipped++;
+            }
+
+            const trResult = await enrich(item, 'tr');
+            if (trResult) {
+              enriched.push(trResult);
             } else {
               totalSkipped++;
             }
