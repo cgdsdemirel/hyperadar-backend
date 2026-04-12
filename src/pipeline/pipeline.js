@@ -16,11 +16,12 @@ const { fetchRssTrends }        = require('./fetchers/rssFetcher');
 const { fetchRedditTrends }     = require('./fetchers/redditFetcher');
 const { fetchSectorTrends }     = require('./fetchers/sectorsFetcher');
 const { fetchJobTrends }        = require('./fetchers/jobsFetcher');
+const { fetchStartupTrends }    = require('./fetchers/startupsFetcher');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const REGIONS    = ['Global', 'ABD', 'Turkiye', 'Almanya', 'Hindistan'];
-const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit', 'sectors', 'jobs'];
+const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit', 'sectors', 'jobs', 'startups'];
 
 const MAX_ENRICH_PER_COMBO = 5;
 
@@ -145,6 +146,12 @@ async function fetchForCombo(category, region) {
       // then sends the top-N table to the LLM to identify growth signals.
       if (region !== 'Global') return [];
       return fetchJobTrends(region);
+
+    case 'startups':
+      // Global-only: collects startup news summaries (name + funding snippet),
+      // sends them to the LLM to identify the 5 with the most momentum.
+      if (region !== 'Global') return [];
+      return fetchStartupTrends(region);
 
     default:
       logger.warn(`[Pipeline] Unknown category: "${category}"`);
