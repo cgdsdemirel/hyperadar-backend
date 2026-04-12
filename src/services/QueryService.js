@@ -81,7 +81,10 @@ class QueryService {
 
     // ── Step 6: slice by plan ─────────────────────────────────────────────────
     const limit  = TREND_LIMIT[user.plan] ?? TREND_LIMIT.free;
-    const trends = allTrends.slice(0, limit);
+    const slice  = allTrends.slice(0, limit);
+
+    // ── Step 6b: annotate with the user's favorited status ───────────────────
+    const trends = await this._annotateFavorites(userId, slice);
 
     // ── Step 7: persist query log ─────────────────────────────────────────────
     const tokenSpent = isPremium ? tokenCost : 0;
@@ -198,6 +201,39 @@ class QueryService {
         trends_remaining:  trendsRemaining,
       },
     };
+  }
+
+  // ─────────────────────────────────────────
+  // Private helpers (continued)
+  // ─────────────────────────────────────────
+
+  /**
+   * Annotate each trend with a `favorited` boolean for the given user.
+   * Non-fatal: returns trends unchanged (with favorited=false) on any DB error.
+   *
+   * @param {string}   userId
+   * @param {object[]} trends - Array of trend objects with `id` field
+   * @returns {Promise<object[]>}
+   */
+  async _annotateFavorites(userId, trends) {
+    if (trends.length === 0) return trends;
+
+    const trendIds = trends.map((t) => t.id).filter(Boolean);
+    if (trendIds.length === 0) return trends.map((t) => ({ ...t, favorited: false }));
+
+    try {
+      const { rows } = await this.db.query(
+        `SELECT trend_id FROM favorites WHERE user_id = $1 AND trend_id = ANY($2::uuid[])`,
+        [userId, trendIds]
+      );
+      const favorited = new Set(rows.map((r) => r.trend_id));
+      return trends.map((t) => ({ ...t, favorited: favorited.has(t.id) }));
+    } catch (err) {
+      logger.warn(
+        `[QueryService] _annotateFavorites failed for user=${userId}: ${err.message}`
+      );
+      return trends.map((t) => ({ ...t, favorited: false }));
+    }
   }
 
   // ─────────────────────────────────────────
