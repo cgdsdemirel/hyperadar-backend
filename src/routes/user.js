@@ -143,4 +143,49 @@ router.get('/favorites/:trend_id/check', authenticate, async (req, res, next) =>
   }
 });
 
+// ── Referral ──────────────────────────────────────────────────────────────────
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * POST /user/referral/track
+ * Body: { referrer_id: UUID, new_user_id: UUID }
+ *
+ * No authentication required — called immediately after registration,
+ * before the client has a chance to attach a token.
+ *
+ * Idempotent: UNIQUE(referred_id) + ON CONFLICT DO NOTHING means a
+ * user can only be referred once even if the request is retried.
+ */
+router.post('/referral/track', async (req, res, next) => {
+  const { referrer_id, new_user_id } = req.body;
+
+  if (!referrer_id || !new_user_id) {
+    return res.status(400).json({ error: 'referrer_id and new_user_id are required' });
+  }
+  if (!UUID_RE.test(referrer_id) || !UUID_RE.test(new_user_id)) {
+    return res.status(400).json({ error: 'Invalid UUID format' });
+  }
+  if (referrer_id === new_user_id) {
+    return res.status(400).json({ error: 'Self-referral is not allowed' });
+  }
+
+  try {
+    const db = req.app.locals.db;
+
+    await db.query(
+      `INSERT INTO referrals (referrer_id, referred_id)
+       VALUES ($1, $2)
+       ON CONFLICT (referred_id) DO NOTHING`,
+      [referrer_id, new_user_id]
+    );
+
+    logger.info(`[Referral] referrer=${referrer_id} referred=${new_user_id}`);
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    logger.error(`[Referral] track failed referrer=${referrer_id} new_user=${new_user_id}`, err);
+    next(err);
+  }
+});
+
 module.exports = router;
