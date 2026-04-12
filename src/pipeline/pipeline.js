@@ -2,6 +2,7 @@
 
 require('dotenv').config();
 
+const https  = require('https');
 const { Pool } = require('pg');
 
 const logger  = require('../utils/logger');
@@ -20,6 +21,93 @@ const REGIONS    = ['Global', 'ABD', 'Turkiye', 'Almanya', 'Hindistan'];
 const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit'];
 
 const MAX_ENRICH_PER_COMBO = 5;
+
+// ─── Expo Push helpers ────────────────────────────────────────────────────────
+
+/**
+ * POST a batch of messages to the Expo Push API (https://exp.host/--/api/v2/push/send).
+ * The API accepts up to 100 messages per request.
+ * Non-throwing — errors are logged but never propagate to the caller.
+ *
+ * @param {object[]} messages
+ */
+function expoPost(messages) {
+  return new Promise((resolve) => {
+    const body = JSON.stringify(messages);
+    const req  = https.request(
+      {
+        hostname: 'exp.host',
+        path:     '/--/api/v2/push/send',
+        method:   'POST',
+        headers: {
+          'Content-Type':    'application/json',
+          'Accept':          'application/json',
+          'Accept-Encoding': 'gzip, deflate',
+          'Content-Length':  Buffer.byteLength(body),
+        },
+      },
+      (res) => { res.resume(); resolve(); }  // consume response to free socket
+    );
+    req.on('error', (err) => {
+      logger.error('[Pipeline] Expo Push request error', err);
+      resolve();   // never reject — notifications are best-effort
+    });
+    req.write(body);
+    req.end();
+  });
+}
+
+/**
+ * After each pipeline run, find high-score trends (>= 80) created in the
+ * last 10 minutes and broadcast push notifications to all registered users.
+ * Capped at 5 distinct trend alerts per run to avoid spam.
+ *
+ * @param {import('pg').Pool} pool
+ */
+async function sendPushNotifications(pool) {
+  try {
+    // Trends saved in this run with high score
+    const { rows: trends } = await pool.query(
+      `SELECT id, title
+         FROM trends
+        WHERE score       >= 80
+          AND created_at  >= now() - interval '10 minutes'
+        ORDER BY score DESC
+        LIMIT 5`
+    );
+    if (trends.length === 0) return;
+
+    // Users who have opted in to push notifications
+    const { rows: users } = await pool.query(
+      `SELECT push_token FROM users WHERE push_token IS NOT NULL`
+    );
+    if (users.length === 0) return;
+
+    const tokens = users.map((u) => u.push_token);
+
+    logger.info(
+      `[Pipeline] Sending push notifications — ${trends.length} trend(s), ${tokens.length} user(s)`
+    );
+
+    // One broadcast per high-score trend; batch each in chunks of 100
+    for (const trend of trends) {
+      const messages = tokens.map((token) => ({
+        to:    token,
+        title: '🔥 Yüksek Puanlı Trend!',
+        body:  trend.title,
+        data:  { trend_id: trend.id },
+      }));
+
+      for (let i = 0; i < messages.length; i += 100) {
+        await expoPost(messages.slice(i, i + 100));
+      }
+    }
+
+    logger.info(`[Pipeline] Push notifications dispatched`);
+  } catch (err) {
+    logger.error('[Pipeline] sendPushNotifications failed', err);
+  }
+}
 
 // ─── Fetcher router ───────────────────────────────────────────────────────────
 
@@ -173,6 +261,9 @@ async function runPipeline(db) {
     );
 
     await completePipelineLog(pool, logId, totalSaved);
+
+    // Send push notifications for high-score trends (best-effort, non-blocking)
+    await sendPushNotifications(pool);
 
     if (ownDb) await pool.end();
 

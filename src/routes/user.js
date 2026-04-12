@@ -143,6 +143,53 @@ router.get('/favorites/:trend_id/check', authenticate, async (req, res, next) =>
   }
 });
 
+// ── Push tokens ───────────────────────────────────────────────────────────────
+
+/**
+ * POST /user/push-token
+ * Body: { token: string }
+ * Save or update the Expo push token for the authenticated user.
+ */
+router.post('/push-token', authenticate, async (req, res, next) => {
+  const { token } = req.body;
+  const userId    = req.user.id;
+
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ error: 'token is required' });
+  }
+
+  try {
+    const db = req.app.locals.db;
+    await db.query(
+      `UPDATE users SET push_token = $1 WHERE id = $2`,
+      [token, userId]
+    );
+    logger.info(`[PushToken] Saved token for user=${userId}`);
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * DELETE /user/push-token
+ * Clear the push token for the authenticated user (disables notifications).
+ */
+router.delete('/push-token', authenticate, async (req, res, next) => {
+  const userId = req.user.id;
+  try {
+    const db = req.app.locals.db;
+    await db.query(
+      `UPDATE users SET push_token = NULL WHERE id = $1`,
+      [userId]
+    );
+    logger.info(`[PushToken] Cleared token for user=${userId}`);
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ── Referral ──────────────────────────────────────────────────────────────────
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
