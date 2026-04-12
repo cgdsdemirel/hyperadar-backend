@@ -25,6 +25,7 @@
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "node-cron": "^3.0.3",
+    "pdfkit": "^0.15.2",
     "pg": "^8.11.5",
     "rss-parser": "^3.13.0",
     "uuid": "^9.0.1"
