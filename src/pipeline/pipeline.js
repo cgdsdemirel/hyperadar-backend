@@ -15,11 +15,12 @@ const { fetchProductHuntTrends }= require('./fetchers/productHuntFetcher');
 const { fetchRssTrends }        = require('./fetchers/rssFetcher');
 const { fetchRedditTrends }     = require('./fetchers/redditFetcher');
 const { fetchSectorTrends }     = require('./fetchers/sectorsFetcher');
+const { fetchJobTrends }        = require('./fetchers/jobsFetcher');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const REGIONS    = ['Global', 'ABD', 'Turkiye', 'Almanya', 'Hindistan'];
-const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit', 'sectors'];
+const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit', 'sectors', 'jobs'];
 
 const MAX_ENRICH_PER_COMBO = 5;
 
@@ -138,6 +139,12 @@ async function fetchForCombo(category, region) {
       // bilingual (EN + TR) records from the returned raw items.
       if (region !== 'Global') return [];
       return fetchSectorTrends(region);
+
+    case 'jobs':
+      // Global-only: groups job titles by normalised role, counts frequency,
+      // then sends the top-N table to the LLM to identify growth signals.
+      if (region !== 'Global') return [];
+      return fetchJobTrends(region);
 
     default:
       logger.warn(`[Pipeline] Unknown category: "${category}"`);
