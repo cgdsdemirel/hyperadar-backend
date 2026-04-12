@@ -139,6 +139,7 @@ app.locals.iapService   = iapService;
 app.use('/auth',   require('./src/routes/auth'));
 app.use('/user',   require('./src/routes/user'));
 app.use('/query',  require('./src/routes/query'));
+app.use('/trends', require('./src/routes/trends'));   // public — no auth
 app.use('/ads',    require('./src/routes/ads'));
 app.use('/tokens', require('./src/routes/iap'));
 app.use('/admin',  require('./src/routes/admin'));

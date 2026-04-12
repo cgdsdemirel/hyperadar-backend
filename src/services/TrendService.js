@@ -127,6 +127,25 @@ class TrendService {
     return rows;
   }
 
+  /**
+   * Fetch a single trend by its UUID. Used by the public deep-link endpoint.
+   * Returns null if not found or if id is not a valid UUID.
+   * @param {string} id
+   * @returns {Promise<object|null>}
+   */
+  async getTrendById(id) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(id)) return null;
+
+    const { rows } = await this.db.query(
+      `SELECT id, title, description, category, region, lang,
+              score, monetization_hint, source, created_at
+         FROM trends WHERE id = $1`,
+      [id]
+    );
+    return rows[0] || null;
+  }
+
   // ─────────────────────────────────────────
   // Maintenance (Phase 4+)
   // ─────────────────────────────────────────
