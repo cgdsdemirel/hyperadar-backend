@@ -63,10 +63,33 @@ class TrendService {
       INSERT INTO trends
         (title, description, category, region, lang, score, monetization_hint, source)
       VALUES ${values.join(', ')}
+      RETURNING id, score
     `;
 
     const result = await this.db.query(sql, params);
-    return result.rowCount;
+    const inserted = result.rows;                    // [{ id, score }, …]
+
+    // Record a score snapshot for every newly inserted trend.
+    // Bulk-insert into trend_score_history in one round-trip.
+    if (inserted.length > 0) {
+      const histVals   = [];
+      const histParams = [];
+      let   hc         = 1;
+      for (const row of inserted) {
+        if (row.score == null) continue;             // skip null-score rows
+        histVals.push(`($${hc++}, $${hc++})`);
+        histParams.push(row.id, row.score);
+      }
+      if (histVals.length > 0) {
+        await this.db.query(
+          `INSERT INTO trend_score_history (trend_id, score)
+           VALUES ${histVals.join(', ')}`,
+          histParams
+        );
+      }
+    }
+
+    return inserted.length;
   }
 
   // ─────────────────────────────────────────
@@ -144,6 +167,28 @@ class TrendService {
       [id]
     );
     return rows[0] || null;
+  }
+
+  /**
+   * Fetch the last 7 score snapshots for a trend, ordered oldest-first.
+   * Returns an empty array if the trend has no history or id is invalid.
+   * @param {string} trendId
+   * @returns {Promise<{ score: number, recorded_at: string }[]>}
+   */
+  async getScoreHistory(trendId) {
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(trendId)) return [];
+
+    const { rows } = await this.db.query(
+      `SELECT score, recorded_at
+         FROM trend_score_history
+        WHERE trend_id = $1
+        ORDER BY recorded_at DESC
+        LIMIT 7`,
+      [trendId]
+    );
+    // Return oldest-first so callers can render a left→right chart
+    return rows.reverse();
   }
 
   // ─────────────────────────────────────────
