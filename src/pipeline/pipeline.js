@@ -14,11 +14,12 @@ const { fetchGithubTrends }     = require('./fetchers/githubFetcher');
 const { fetchProductHuntTrends }= require('./fetchers/productHuntFetcher');
 const { fetchRssTrends }        = require('./fetchers/rssFetcher');
 const { fetchRedditTrends }     = require('./fetchers/redditFetcher');
+const { fetchSectorTrends }     = require('./fetchers/sectorsFetcher');
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
 const REGIONS    = ['Global', 'ABD', 'Turkiye', 'Almanya', 'Hindistan'];
-const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit'];
+const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit', 'sectors'];
 
 const MAX_ENRICH_PER_COMBO = 5;
 
@@ -130,6 +131,13 @@ async function fetchForCombo(category, region) {
 
     case 'reddit':
       return fetchRedditTrends(region);
+
+    case 'sectors':
+      // Global-only: the fetcher aggregates cross-source headlines into sector
+      // signals via one LLM call. The pipeline's enrich() loop then produces
+      // bilingual (EN + TR) records from the returned raw items.
+      if (region !== 'Global') return [];
+      return fetchSectorTrends(region);
 
     default:
       logger.warn(`[Pipeline] Unknown category: "${category}"`);
