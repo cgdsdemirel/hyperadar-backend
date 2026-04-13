@@ -25,6 +25,19 @@ const CATEGORIES = ['youtube', 'github', 'ai_tools', 'reddit', 'sectors', 'jobs'
 
 const MAX_ENRICH_PER_COMBO = 5;
 
+/**
+ * Maps each HypeRadar region to its native output language.
+ * Used to select the second (localised) enrichment language per region.
+ * English-speaking regions produce only one version ('en').
+ */
+const REGION_NATIVE_LANG = {
+  Global:    'en',
+  ABD:       'en',
+  Turkiye:   'tr',
+  Almanya:   'de',
+  Hindistan: 'hi',
+};
+
 // ─── Expo Push helpers ────────────────────────────────────────────────────────
 
 /**
@@ -110,6 +123,33 @@ async function sendPushNotifications(pool) {
   } catch (err) {
     logger.error('[Pipeline] sendPushNotifications failed', err);
   }
+}
+
+// ─── Dedup filter ────────────────────────────────────────────────────────────
+
+/**
+ * Remove trends that already exist in the DB today (same title + region + category).
+ * Prevents re-saving identical items on repeated pipeline runs within the same day.
+ *
+ * @param {import('pg').Pool} pool
+ * @param {object[]} trends
+ * @returns {Promise<object[]>} Only the trends not yet saved today
+ */
+async function filterExistingTrends(pool, trends) {
+  const fresh = [];
+  for (const trend of trends) {
+    const { rows } = await pool.query(
+      `SELECT 1 FROM trends
+        WHERE title        = $1
+          AND region       = $2
+          AND category     = $3
+          AND created_at::date = CURRENT_DATE
+        LIMIT 1`,
+      [trend.title, trend.region, trend.category]
+    );
+    if (rows.length === 0) fresh.push(trend);
+  }
+  return fresh;
 }
 
 // ─── Fetcher router ───────────────────────────────────────────────────────────
@@ -246,6 +286,10 @@ async function runPipeline(db) {
           const slice   = deduped.slice(0, MAX_ENRICH_PER_COMBO);
           const enriched = [];
 
+          // Bug 3 fix: use the region's native language for the second enrichment
+          // call instead of hardcoding 'tr' for every region.
+          const regionNativeLang = REGION_NATIVE_LANG[region] || 'en';
+
           for (const item of slice) {
             const enResult = await enrich(item, 'en');
             if (enResult) {
@@ -254,11 +298,14 @@ async function runPipeline(db) {
               totalSkipped++;
             }
 
-            const trResult = await enrich(item, 'tr');
-            if (trResult) {
-              enriched.push(trResult);
-            } else {
-              totalSkipped++;
+            // Only produce a native-language version when the region is non-English
+            if (regionNativeLang !== 'en') {
+              const nativeResult = await enrich(item, regionNativeLang);
+              if (nativeResult) {
+                enriched.push(nativeResult);
+              } else {
+                totalSkipped++;
+              }
             }
           }
 
@@ -267,7 +314,14 @@ async function runPipeline(db) {
             continue;
           }
 
-          const saved = await trendSvc.saveTrends(enriched);
+          // Bug 2 fix: skip trends already saved today (same title + region + category)
+          const fresh = await filterExistingTrends(pool, enriched);
+          if (fresh.length === 0) {
+            logger.info(`[Pipeline] ${label} — all trends already exist today, skipping`);
+            continue;
+          }
+
+          const saved = await trendSvc.saveTrends(fresh);
           totalSaved += saved;
 
           logger.info(`[Pipeline] ${label} — saved ${saved} trends`);

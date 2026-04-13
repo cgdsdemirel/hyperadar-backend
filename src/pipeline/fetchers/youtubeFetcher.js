@@ -130,6 +130,7 @@ async function fetchYouTubeTrends(region) {
       part:       'snippet',
       chart:      'mostPopular',
       maxResults: MAX_RESULTS,
+      hl:         lang,   // host language — ensures region-appropriate content, not API-key-locale default
       key:        process.env.YOUTUBE_API_KEY,
     };
     if (regionCode) params.regionCode = regionCode;
