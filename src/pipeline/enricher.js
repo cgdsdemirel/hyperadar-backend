@@ -68,6 +68,13 @@ async function callClaude(prompt) {
  * @returns {Promise<object|null>} Enriched trend or null if both attempts fail
  */
 async function enrich(rawTrend, lang = 'en') {
+  // Items pre-enriched by their fetcher (e.g. YouTube batch analysis) already
+  // have score, description, and monetization_hint set — pass through directly.
+  if (rawTrend.pre_enriched) {
+    const { pre_enriched, ...rest } = rawTrend;
+    return rest;
+  }
+
   const langInstruction = lang === 'tr'
     ? 'Respond in Turkish. Translate all fields to Turkish.'
     : 'Respond in English.';
