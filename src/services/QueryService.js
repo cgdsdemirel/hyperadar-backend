@@ -13,11 +13,16 @@ const {
 const ALLOWED_REGIONS    = new Set(['Global', 'ABD', 'Turkiye', 'Almanya', 'Hindistan']);
 const ALLOWED_CATEGORIES = new Set(['youtube', 'github', 'ai_tools', 'reddit']);
 
-/** How many trends each plan tier sees in a response */
-const TREND_LIMIT = { free: 1, premium: 5 };
+/**
+ * How many trends per category are fetched from the DB per plan.
+ * Both tiers fetch the full 5 — free users receive all of them but the
+ * frontend shows only 1 initially and reveals more as ads are watched.
+ * Sending all trends upfront avoids a second round-trip after each ad.
+ */
+const TREND_LIMIT = { free: 5, premium: 5 };
 
-/** Total trends available — used to compute unlock_more.trends_remaining */
-const TOTAL_TRENDS_AVAILABLE = 5;
+/** Slots the free plan can unlock via ads (slots 1 and 2 in the result list) */
+const FREE_AD_UNLOCKABLE_SLOTS = 2;
 
 class QueryService {
   /**
@@ -190,16 +195,16 @@ class QueryService {
       };
     }
 
-    // Free tier: expose how many more trends are locked behind an ad/upgrade
-    const trendsReturned   = trends.length;
-    const trendsRemaining  = Math.max(0, TOTAL_TRENDS_AVAILABLE - trendsReturned);
+    // Free tier: slot 0 is visible by default; slots 1–2 unlock via ads.
+    // lockedCount = how many ad-unlockable slots actually have data.
+    const lockedCount = Math.min(FREE_AD_UNLOCKABLE_SLOTS, Math.max(0, trends.length - 1));
 
     return {
       trends,
       token_spent: 0,
       unlock_more: {
-        ad_required:       true,
-        trends_remaining:  trendsRemaining,
+        ad_required:      lockedCount > 0,
+        trends_remaining: lockedCount,
       },
     };
   }
