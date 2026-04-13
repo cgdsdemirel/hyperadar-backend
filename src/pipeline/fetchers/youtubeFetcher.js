@@ -121,51 +121,51 @@ async function callClaudeForYoutube(prompt) {
  * @returns {Promise<Array<object>>}
  */
 async function fetchYouTubeTrends(region) {
-  try {
-    const regionCode = REGION_CODE_MAP[region] ?? '';
-    const lang       = REGION_LANG_MAP[regionCode] ?? 'en';
+  console.log(`[YouTubeFetcher] Starting for region: ${region}`);
 
-    // ── 1. Fetch raw YouTube most-popular videos ──────────────────────────────
-    const params = {
-      part:       'snippet',
-      chart:      'mostPopular',
-      maxResults: MAX_RESULTS,
-      hl:         lang,   // host language — ensures region-appropriate content, not API-key-locale default
-      key:        process.env.YOUTUBE_API_KEY,
-    };
-    if (regionCode) params.regionCode = regionCode;
+  const regionCode = REGION_CODE_MAP[region] ?? '';
+  const lang       = REGION_LANG_MAP[regionCode] ?? 'en';
 
-    const { data } = await axios.get(BASE_URL, { params, timeout: 10_000 });
-    const items = (data.items || []).map((item) => ({
-      title:       item.snippet.title       || '',
-      description: item.snippet.description || '',
-    }));
+  // ── 1. Fetch raw YouTube most-popular videos ──────────────────────────────
+  const params = {
+    part:       'snippet',
+    chart:      'mostPopular',
+    maxResults: MAX_RESULTS,
+    hl:         lang,   // host language — ensures region-appropriate content, not API-key-locale default
+    key:        process.env.YOUTUBE_API_KEY,
+  };
+  if (regionCode) params.regionCode = regionCode;
 
-    if (items.length === 0) return [];
+  const { data } = await axios.get(BASE_URL, { params, timeout: 10_000 });
+  const items = (data.items || []).map((item) => ({
+    title:       item.snippet.title       || '',
+    description: item.snippet.description || '',
+  }));
 
-    // ── 2. Analyze with Claude using the early-signal prompt ──────────────────
-    const prompt      = buildYoutubePrompt(region, items, lang);
-    const opportunities = await callClaudeForYoutube(prompt);
-
-    // ── 3. Shape results to match the enricher's output contract ─────────────
-    return opportunities.slice(0, 5).map((opp) => {
-      const score = parseInt(opp.score, 10);
-      return {
-        title:             String(opp.title             || '').slice(0, 255),
-        description:       String(opp.description       || ''),
-        score:             Number.isFinite(score) ? Math.min(100, Math.max(0, score)) : 0,
-        monetization_hint: String(opp.monetization_hint || ''),
-        category:          'youtube',
-        region,
-        lang,
-        source:            'youtube',
-        pre_enriched:      true,   // signals enricher to skip re-processing
-      };
-    });
-  } catch (err) {
-    logger.error(`[YouTubeFetcher] Failed for region="${region}"`, err);
+  if (items.length === 0) {
+    logger.warn(`[YouTubeFetcher] No items returned by YouTube API for region="${region}"`);
     return [];
   }
+
+  // ── 2. Analyze with Claude using the early-signal prompt ──────────────────
+  const prompt        = buildYoutubePrompt(region, items, lang);
+  const opportunities = await callClaudeForYoutube(prompt);
+
+  // ── 3. Shape results to match the enricher's output contract ─────────────
+  return opportunities.slice(0, 5).map((opp) => {
+    const score = parseInt(opp.score, 10);
+    return {
+      title:             String(opp.title             || '').slice(0, 255),
+      description:       String(opp.description       || ''),
+      score:             Number.isFinite(score) ? Math.min(100, Math.max(0, score)) : 0,
+      monetization_hint: String(opp.monetization_hint || ''),
+      category:          'youtube',
+      region,
+      lang,
+      source:            'youtube',
+      pre_enriched:      true,   // signals enricher to skip re-processing
+    };
+  });
 }
 
 module.exports = { fetchYouTubeTrends };
