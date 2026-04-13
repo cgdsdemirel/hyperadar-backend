@@ -289,23 +289,42 @@ router.patch('/users/:id', adminAuth, async (req, res, next) => {
       return res.status(400).json({ error: `plan must be one of: ${VALID_PLANS.join(', ')}` });
     }
 
-    const { rows } = await db.query(
-      `UPDATE users SET plan = $1 WHERE id = $2
-       RETURNING id, email, plan, created_at`,
-      [plan, userId]
+    // 1. Confirm user exists before attempting the update
+    const { rows: existing } = await db.query(
+      'SELECT id FROM users WHERE id = $1',
+      [userId]
     );
-
-    if (rows.length === 0) {
+    if (existing.length === 0) {
       return res.status(404).json({ error: 'User not found' });
     }
 
-    // When upgrading to premium, ensure the user has the monthly token allowance.
+    // 2. Explicit UPDATE — no RETURNING, so we know exactly what ran
+    await db.query(
+      'UPDATE users SET plan = $1 WHERE id = $2',
+      [plan, userId]
+    );
+
+    // 3. Verify by reading back from DB — this is the source of truth
+    const { rows: verified } = await db.query(
+      'SELECT id, email, plan, created_at FROM users WHERE id = $1',
+      [userId]
+    );
+    const savedPlan = verified[0]?.plan;
+
+    if (savedPlan !== plan) {
+      logger.error(
+        `[Admin] Plan mismatch user=${userId}: requested="${plan}" saved="${savedPlan}"`
+      );
+      return res.status(500).json({ error: 'Plan update did not persist' });
+    }
+
+    // 4. When upgrading to premium, ensure the monthly token allowance exists
     if (plan === 'premium') {
-      const { rows: existing } = await db.query(
+      const { rows: bal } = await db.query(
         'SELECT 1 FROM token_balances WHERE user_id = $1',
         [userId]
       );
-      if (existing.length > 0) {
+      if (bal.length > 0) {
         await db.query(
           'UPDATE token_balances SET monthly_tokens = 4000 WHERE user_id = $1',
           [userId]
@@ -319,24 +338,10 @@ router.patch('/users/:id', adminAuth, async (req, res, next) => {
       }
     }
 
-    // Confirm the update actually persisted — guards against silent no-ops
-    // (e.g. a trigger or RLS policy reverting the change).
-    const { rows: confirmed } = await db.query(
-      'SELECT id, email, plan, created_at FROM users WHERE id = $1',
-      [userId]
-    );
-    const savedPlan = confirmed[0]?.plan;
-    if (savedPlan !== plan) {
-      logger.error(
-        `[Admin] Plan mismatch for user ${userId}: requested="${plan}" saved="${savedPlan}"`
-      );
-      return res.status(500).json({ error: 'Plan update did not persist' });
-    }
-
     logger.info(
-      `[Admin] User ${userId} plan → "${savedPlan}" (confirmed) by ${req.admin.email}`
+      `[Admin] User ${userId} plan → "${savedPlan}" (DB-verified) by ${req.admin.email}`
     );
-    return res.status(200).json({ user: confirmed[0] });
+    return res.status(200).json({ user: verified[0] });
   } catch (err) {
     logger.error('[Admin] PATCH /users/:id error', err);
     next(err);
