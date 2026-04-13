@@ -299,6 +299,18 @@ router.patch('/users/:id', adminAuth, async (req, res, next) => {
       return res.status(404).json({ error: 'User not found' });
     }
 
+    // When upgrading to premium, ensure the user has the monthly token allowance.
+    // Uses upsert so it works whether or not a token_balances row already exists.
+    if (plan === 'premium') {
+      await db.query(
+        `INSERT INTO token_balances (user_id, monthly_tokens)
+              VALUES ($1, 4000)
+         ON CONFLICT (user_id)
+           DO UPDATE SET monthly_tokens = 4000`,
+        [userId]
+      );
+    }
+
     logger.info(`[Admin] User ${userId} plan → "${plan}" by ${req.admin.email}`);
     return res.status(200).json({ user: rows[0] });
   } catch (err) {
