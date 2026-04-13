@@ -319,8 +319,24 @@ router.patch('/users/:id', adminAuth, async (req, res, next) => {
       }
     }
 
-    logger.info(`[Admin] User ${userId} plan → "${plan}" by ${req.admin.email}`);
-    return res.status(200).json({ user: rows[0] });
+    // Confirm the update actually persisted — guards against silent no-ops
+    // (e.g. a trigger or RLS policy reverting the change).
+    const { rows: confirmed } = await db.query(
+      'SELECT id, email, plan, created_at FROM users WHERE id = $1',
+      [userId]
+    );
+    const savedPlan = confirmed[0]?.plan;
+    if (savedPlan !== plan) {
+      logger.error(
+        `[Admin] Plan mismatch for user ${userId}: requested="${plan}" saved="${savedPlan}"`
+      );
+      return res.status(500).json({ error: 'Plan update did not persist' });
+    }
+
+    logger.info(
+      `[Admin] User ${userId} plan → "${savedPlan}" (confirmed) by ${req.admin.email}`
+    );
+    return res.status(200).json({ user: confirmed[0] });
   } catch (err) {
     logger.error('[Admin] PATCH /users/:id error', err);
     next(err);
