@@ -77,14 +77,15 @@ class QueryService {
     }
 
     // ── Step 5: fetch trends (always from DB — no live pipeline call) ─────────
-    const allTrends = await this.trendService.getTrends(regions, categories, lang);
+    // perCategoryLimit enforced in SQL so both categories always get results.
+    const limit     = TREND_LIMIT[user.plan] ?? TREND_LIMIT.free;
+    const allTrends = await this.trendService.getTrends(regions, categories, lang, limit);
 
-    // ── Step 6: slice by plan ─────────────────────────────────────────────────
-    const limit  = TREND_LIMIT[user.plan] ?? TREND_LIMIT.free;
-    const slice  = allTrends.slice(0, limit);
-
-    // ── Step 6b: annotate with the user's favorited status ───────────────────
-    const trends = await this._annotateFavorites(userId, slice);
+    // ── Step 6: annotate with the user's favorited status ────────────────────
+    // No application-level slice — the DB already returns at most `limit` rows
+    // per category, so the total is categories.length * limit (e.g. 10 for
+    // premium with 2 categories, 1 for free with 1 category).
+    const trends = await this._annotateFavorites(userId, allTrends);
 
     // ── Step 7: persist query log ─────────────────────────────────────────────
     const tokenSpent = isPremium ? tokenCost : 0;

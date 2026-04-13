@@ -97,25 +97,29 @@ class TrendService {
   // ─────────────────────────────────────────
 
   /**
-   * Fetch the top 5 trends for the requested regions, categories, and language.
+   * Fetch the top trends for the requested regions, categories, and language.
+   *
+   * Returns up to `perCategoryLimit` results per category so that selecting
+   * two categories always yields results from both (not just the highest-scoring one).
    *
    * Deduplication: only the highest-scoring row per title is returned.
    * Fallback chain:
-   *   1. Match requested regions + categories + lang → up to 5 rows
+   *   1. Match requested regions + categories + lang → up to perCategoryLimit rows/category
    *   2. If empty, retry with region = 'Global'
    *   3. If still empty, return FALLBACK_RESULT
    *
-   * @param {string[]} regions    - e.g. ['Turkiye', 'Global']
-   * @param {string[]} categories - e.g. ['youtube', 'reddit']
-   * @param {string}   [lang='en'] - Language filter, e.g. 'en' or 'tr'
+   * @param {string[]} regions          - e.g. ['Turkiye', 'Global']
+   * @param {string[]} categories       - e.g. ['youtube', 'reddit']
+   * @param {string}   [lang='en']      - Language filter, e.g. 'en' or 'tr'
+   * @param {number}   [perCategoryLimit=5] - Max results per category
    * @returns {Promise<object[]>}
    */
-  async getTrends(regions, categories, lang = 'en') {
-    const rows = await this._query(regions, categories, lang);
+  async getTrends(regions, categories, lang = 'en', perCategoryLimit = 5) {
+    const rows = await this._query(regions, categories, lang, perCategoryLimit);
     if (rows.length > 0) return rows;
 
     logger.warn(`[TrendService] No results for regions=${JSON.stringify(regions)} lang=${lang}, falling back to Global`);
-    const globalRows = await this._query(['Global'], categories, lang);
+    const globalRows = await this._query(['Global'], categories, lang, perCategoryLimit);
     if (globalRows.length > 0) return globalRows;
 
     logger.warn('[TrendService] No results even for Global — returning fallback');
@@ -123,29 +127,38 @@ class TrendService {
   }
 
   /**
-   * Internal query: deduplicated by title (highest score wins), ordered by score DESC.
+   * Internal query: deduplicated by title (highest score wins),
+   * then limited to perCategoryLimit rows per category.
    * @private
    */
-  async _query(regions, categories, lang) {
+  async _query(regions, categories, lang, perCategoryLimit = 5) {
     const { rows } = await this.db.query(
-      `WITH ranked AS (
-         SELECT *,
-                ROW_NUMBER() OVER (
-                  PARTITION BY title
-                  ORDER BY score DESC, created_at DESC
-                ) AS rn
+      `WITH deduped AS (
+         -- Keep only the highest-scoring row per unique title
+         SELECT DISTINCT ON (title)
+                id, title, description, category, region, lang,
+                score, monetization_hint, source, created_at
            FROM trends
           WHERE region   = ANY($1::varchar[])
             AND category = ANY($2::varchar[])
             AND lang     = $3
+          ORDER BY title, score DESC, created_at DESC
+       ),
+       ranked AS (
+         -- Rank within each category so we can slice per-category
+         SELECT *,
+                ROW_NUMBER() OVER (
+                  PARTITION BY category
+                  ORDER BY score DESC, created_at DESC
+                ) AS cat_rn
+           FROM deduped
        )
        SELECT id, title, description, category, region, lang,
               score, monetization_hint, source, created_at
          FROM ranked
-        WHERE rn = 1
-        ORDER BY score DESC, created_at DESC
-        LIMIT 5`,
-      [regions, categories, lang]
+        WHERE cat_rn <= $4
+        ORDER BY category, score DESC, created_at DESC`,
+      [regions, categories, lang, perCategoryLimit]
     );
     return rows;
   }
