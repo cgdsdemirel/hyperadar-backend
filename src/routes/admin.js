@@ -284,7 +284,7 @@ router.patch('/users/:id', adminAuth, async (req, res, next) => {
     const userId = req.params.id;
     const { plan } = req.body;
 
-    const VALID_PLANS = ['free', 'premium', 'pro'];
+    const VALID_PLANS = ['free', 'premium'];
     if (!plan || !VALID_PLANS.includes(plan)) {
       return res.status(400).json({ error: `plan must be one of: ${VALID_PLANS.join(', ')}` });
     }
@@ -300,15 +300,23 @@ router.patch('/users/:id', adminAuth, async (req, res, next) => {
     }
 
     // When upgrading to premium, ensure the user has the monthly token allowance.
-    // Uses upsert so it works whether or not a token_balances row already exists.
     if (plan === 'premium') {
-      await db.query(
-        `INSERT INTO token_balances (user_id, monthly_tokens)
-              VALUES ($1, 4000)
-         ON CONFLICT (user_id)
-           DO UPDATE SET monthly_tokens = 4000`,
+      const { rows: existing } = await db.query(
+        'SELECT 1 FROM token_balances WHERE user_id = $1',
         [userId]
       );
+      if (existing.length > 0) {
+        await db.query(
+          'UPDATE token_balances SET monthly_tokens = 4000 WHERE user_id = $1',
+          [userId]
+        );
+      } else {
+        await db.query(
+          `INSERT INTO token_balances (user_id, monthly_tokens, purchased_tokens, reset_date)
+           VALUES ($1, 4000, 0, NOW())`,
+          [userId]
+        );
+      }
     }
 
     logger.info(`[Admin] User ${userId} plan → "${plan}" by ${req.admin.email}`);
