@@ -273,6 +273,40 @@ router.get('/users/:id', adminAuth, async (req, res, next) => {
   }
 });
 
+/**
+ * PATCH /admin/users/:id
+ * Body: { plan }
+ * Changes a user's plan. Valid values: free, premium, pro
+ */
+router.patch('/users/:id', adminAuth, async (req, res, next) => {
+  try {
+    const db     = req.app.locals.db;
+    const userId = req.params.id;
+    const { plan } = req.body;
+
+    const VALID_PLANS = ['free', 'premium', 'pro'];
+    if (!plan || !VALID_PLANS.includes(plan)) {
+      return res.status(400).json({ error: `plan must be one of: ${VALID_PLANS.join(', ')}` });
+    }
+
+    const { rows } = await db.query(
+      `UPDATE users SET plan = $1 WHERE id = $2
+       RETURNING id, email, plan, created_at`,
+      [plan, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    logger.info(`[Admin] User ${userId} plan → "${plan}" by ${req.admin.email}`);
+    return res.status(200).json({ user: rows[0] });
+  } catch (err) {
+    logger.error('[Admin] PATCH /users/:id error', err);
+    next(err);
+  }
+});
+
 // ─── Revenue ──────────────────────────────────────────────────────────────────
 
 /**
