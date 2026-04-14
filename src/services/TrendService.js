@@ -115,14 +115,29 @@ class TrendService {
    * @returns {Promise<object[]>}
    */
   async getTrends(regions, categories, lang = 'en', perCategoryLimit = 5) {
+    // 1. Exact match: requested regions + lang
     const rows = await this._query(regions, categories, lang, perCategoryLimit);
     if (rows.length > 0) return rows;
 
+    // 2. Lang fallback: same regions, try 'en' (pipeline may not have run for this lang yet)
+    if (lang !== 'en') {
+      logger.warn(`[TrendService] No results for regions=${JSON.stringify(regions)} lang=${lang}, retrying with lang=en`);
+      const enRows = await this._query(regions, categories, 'en', perCategoryLimit);
+      if (enRows.length > 0) return enRows;
+    }
+
+    // 3. Region fallback: try Global with original lang
     logger.warn(`[TrendService] No results for regions=${JSON.stringify(regions)} lang=${lang}, falling back to Global`);
     const globalRows = await this._query(['Global'], categories, lang, perCategoryLimit);
     if (globalRows.length > 0) return globalRows;
 
-    logger.warn('[TrendService] No results even for Global — returning fallback');
+    // 4. Global + en
+    if (lang !== 'en') {
+      const globalEnRows = await this._query(['Global'], categories, 'en', perCategoryLimit);
+      if (globalEnRows.length > 0) return globalEnRows;
+    }
+
+    logger.warn('[TrendService] No results for any fallback combination — returning placeholder');
     return FALLBACK_RESULT;
   }
 

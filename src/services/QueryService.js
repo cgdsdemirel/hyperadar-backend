@@ -14,12 +14,11 @@ const ALLOWED_REGIONS    = new Set(['Global', 'ABD', 'Turkiye', 'Almanya', 'Hind
 const ALLOWED_CATEGORIES = new Set(['youtube', 'github', 'ai_tools', 'reddit']);
 
 /**
- * How many trends per category are fetched from the DB per plan.
- * Both tiers fetch the full 5 — free users receive all of them but the
- * frontend shows only 1 initially and reveals more as ads are watched.
- * Sending all trends upfront avoids a second round-trip after each ad.
+ * How many trends per category the DB returns for every query, regardless of plan.
+ * Display logic (how many are visible vs locked) is handled entirely on the mobile side.
+ * Sending all trends upfront avoids a second round-trip after each ad watch.
  */
-const TREND_LIMIT = { free: 5, premium: 5 };
+const TRENDS_PER_QUERY = 5;
 
 /** Slots the free plan can unlock via ads (slots 1 and 2 in the result list) */
 const FREE_AD_UNLOCKABLE_SLOTS = 2;
@@ -82,14 +81,13 @@ class QueryService {
     }
 
     // ── Step 5: fetch trends (always from DB — no live pipeline call) ─────────
-    // perCategoryLimit enforced in SQL so both categories always get results.
-    const limit     = TREND_LIMIT[user.plan] ?? TREND_LIMIT.free;
-    const allTrends = await this.trendService.getTrends(regions, categories, lang, limit);
+    // TRENDS_PER_QUERY is the same for every plan; the mobile app decides how
+    // many to show vs lock. Both categories always get results because the limit
+    // is enforced per-category in SQL (total = categories.length × TRENDS_PER_QUERY,
+    // e.g. 5 for a free user with 1 category, 10 for premium with 2 categories).
+    const allTrends = await this.trendService.getTrends(regions, categories, lang, TRENDS_PER_QUERY);
 
     // ── Step 6: annotate with the user's favorited status ────────────────────
-    // No application-level slice — the DB already returns at most `limit` rows
-    // per category, so the total is categories.length * limit (e.g. 10 for
-    // premium with 2 categories, 1 for free with 1 category).
     const trends = await this._annotateFavorites(userId, allTrends);
 
     // ── Step 7: persist query log ─────────────────────────────────────────────
