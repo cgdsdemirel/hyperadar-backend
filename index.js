@@ -51,7 +51,7 @@ const cors    = require('cors');
 
 const logger            = require('./src/utils/logger');
 const pool              = require('./src/config/db');
-const { globalLimiter } = require('./src/middleware/rateLimiter');
+const { authLimiter, queryLimiter, adminLimiter, generalLimiter } = require('./src/middleware/rateLimiter');
 const { AuthService }   = require('./src/services/AuthService');
 const { TokenService }  = require('./src/services/TokenService');
 const { TrendService }  = require('./src/services/TrendService');
@@ -114,7 +114,7 @@ app.use((req, res, next) => {
 });
 
 // Global rate limiter (applied after /health so healthchecks are never rate-limited)
-app.use(globalLimiter);
+app.use(generalLimiter);
 
 // ─── Service instances ────────────────────────────────────────────────────────
 
@@ -136,13 +136,13 @@ app.locals.iapService   = iapService;
 
 // ─── Routes ───────────────────────────────────────────────────────────────────
 
-app.use('/auth',   require('./src/routes/auth'));
+app.use('/auth',   authLimiter, require('./src/routes/auth'));
 app.use('/user',   require('./src/routes/user'));
-app.use('/query',  require('./src/routes/query'));
+app.use('/query',  queryLimiter, require('./src/routes/query'));
 app.use('/trends', require('./src/routes/trends'));   // public — no auth
 app.use('/ads',    require('./src/routes/ads'));
 app.use('/tokens', require('./src/routes/iap'));
-app.use('/admin',    require('./src/routes/admin'));
+app.use('/admin',    adminLimiter, require('./src/routes/admin'));
 app.use('/reports',  require('./src/routes/reports'));
 app.use('/api-keys', require('./src/routes/api-keys'));
 
