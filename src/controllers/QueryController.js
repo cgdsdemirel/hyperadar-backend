@@ -39,10 +39,10 @@ const {
 async function execute(req, res, next) {
   try {
     const userId                   = req.user.id;
-    const { regions, categories, lang } = req.body;
+    const { regions, categories, lang, includeSeen } = req.body;
 
     const { queryService } = req.app.locals;
-    const result = await queryService.executeQuery(userId, regions, categories, lang);
+    const result = await queryService.executeQuery(userId, regions, categories, lang, includeSeen === true);
 
     return res.status(200).json(result);
   } catch (err) {

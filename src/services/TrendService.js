@@ -142,6 +142,109 @@ class TrendService {
   }
 
   /**
+   * Like getTrends but filters out trends the user has already seen within
+   * the last 7 days, unless the trend's score has surged 40%+ since last view.
+   *
+   * @param {string}   userId
+   * @param {string[]} regions
+   * @param {string[]} categories
+   * @param {string}   lang
+   * @param {number}   perCategoryLimit
+   * @param {boolean}  [includeSeen=false] - When true, behaves exactly like getTrends
+   * @returns {Promise<{ trends: object[], availableFreshCount: number }>}
+   */
+  async getTrendsWithSeenFilter(userId, regions, categories, lang, perCategoryLimit, includeSeen = false) {
+    const SEEN_WINDOW_DAYS = 7;
+    const SURGE_THRESHOLD = 1.4;
+
+    // If includeSeen is true, behave exactly like getTrends (ignore seen_trends)
+    if (includeSeen) {
+      const trends = await this.getTrends(regions, categories, lang, perCategoryLimit);
+      return { trends, availableFreshCount: trends.length };
+    }
+
+    // Fetch top 15 per category, then filter
+    const POOL_SIZE = 15;
+    const rawTrends = await this.getTrends(regions, categories, lang, POOL_SIZE);
+
+    if (rawTrends.length === 0) {
+      return { trends: [], availableFreshCount: 0 };
+    }
+
+    // Get seen records for this user in last 7 days
+    const trendIds = rawTrends.map(t => t.id);
+    const { rows: seenRows } = await this.db.query(
+      `SELECT trend_id, score_at_view, seen_at
+         FROM seen_trends
+        WHERE user_id = $1
+          AND trend_id = ANY($2)
+          AND seen_at > NOW() - INTERVAL '${SEEN_WINDOW_DAYS} days'`,
+      [userId, trendIds]
+    );
+
+    const seenMap = new Map();
+    for (const row of seenRows) {
+      seenMap.set(row.trend_id, row);
+    }
+
+    // Filter: keep unseen, OR seen-but-surged (40%+ score increase)
+    const filtered = [];
+    for (const trend of rawTrends) {
+      const seen = seenMap.get(trend.id);
+      if (!seen) {
+        filtered.push(trend);
+        continue;
+      }
+      const prevScore = Number(seen.score_at_view) || 0;
+      const currScore = Number(trend.score) || 0;
+      if (prevScore > 0 && currScore >= prevScore * SURGE_THRESHOLD) {
+        filtered.push({ ...trend, is_resurgent: true, prev_score: prevScore });
+      }
+    }
+
+    // Group by category and limit per category
+    const byCategory = new Map();
+    for (const t of filtered) {
+      if (!byCategory.has(t.category)) byCategory.set(t.category, []);
+      byCategory.get(t.category).push(t);
+    }
+
+    const result = [];
+    for (const cat of categories) {
+      const slice = (byCategory.get(cat) || []).slice(0, perCategoryLimit);
+      result.push(...slice);
+    }
+
+    return { trends: result, availableFreshCount: result.length };
+  }
+
+  /**
+   * Record which trends were shown to a user (upsert, ignore duplicates).
+   * @param {string}   userId
+   * @param {object[]} trends - Array of trend objects with id and score
+   */
+  async recordSeenTrends(userId, trends) {
+    if (!trends || trends.length === 0) return;
+
+    const values = [];
+    const params = [];
+    let p = 1;
+    for (const t of trends) {
+      if (!t.id || t.score == null) continue;
+      values.push(`($${p++}, $${p++}, $${p++})`);
+      params.push(userId, t.id, t.score);
+    }
+    if (values.length === 0) return;
+
+    await this.db.query(
+      `INSERT INTO seen_trends (user_id, trend_id, score_at_view)
+       VALUES ${values.join(', ')}
+       ON CONFLICT DO NOTHING`,
+      params
+    );
+  }
+
+  /**
    * Internal query: deduplicated by title (highest score wins),
    * then limited to perCategoryLimit rows per category.
    * @private

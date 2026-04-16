@@ -58,7 +58,7 @@ class QueryService {
    * @param {string}   [lang='en'] - Language of trends to return ('en' or 'tr')
    * @returns {Promise<object>} Shaped query response
    */
-  async executeQuery(userId, regions, categories, lang = 'en') {
+  async executeQuery(userId, regions, categories, lang = 'en', includeSeen = false) {
     // ── Step 1: validate input ────────────────────────────────────────────────
     this._validateInput(regions, categories);
 
@@ -85,10 +85,14 @@ class QueryService {
     // many to show vs lock. Both categories always get results because the limit
     // is enforced per-category in SQL (total = categories.length × TRENDS_PER_QUERY,
     // e.g. 5 for a free user with 1 category, 10 for premium with 2 categories).
-    const allTrends = await this.trendService.getTrends(regions, categories, lang, TRENDS_PER_QUERY);
+    const { trends: allTrends, availableFreshCount } = await this.trendService.getTrendsWithSeenFilter(
+      userId, regions, categories, lang, TRENDS_PER_QUERY, includeSeen
+    );
 
     // ── Step 6: annotate with the user's favorited status ────────────────────
     const trends = await this._annotateFavorites(userId, allTrends);
+
+    await this.trendService.recordSeenTrends(userId, trends);
 
     // ── Step 7: persist query log ─────────────────────────────────────────────
     const tokenSpent = isPremium ? tokenCost : 0;
@@ -101,7 +105,9 @@ class QueryService {
     );
 
     // ── Step 8: shape response ────────────────────────────────────────────────
-    return this._buildResponse({ trends, tokenSpent, isPremium, remainingTokens });
+    const expectedCount = categories.length * TRENDS_PER_QUERY;
+    const limitedResults = !includeSeen && availableFreshCount < expectedCount;
+    return this._buildResponse({ trends, tokenSpent, isPremium, remainingTokens, limitedResults, availableFreshCount });
   }
 
   // ─────────────────────────────────────────
@@ -184,27 +190,29 @@ class QueryService {
    * Free:    { trends, token_spent: 0, unlock_more }
    * Premium: { trends, token_spent, remaining_tokens }
    */
-  _buildResponse({ trends, tokenSpent, isPremium, remainingTokens }) {
-    if (isPremium) {
-      return {
-        trends,
-        token_spent:      tokenSpent,
-        remaining_tokens: remainingTokens,
-      };
+  _buildResponse({ trends, tokenSpent, isPremium, remainingTokens, limitedResults, availableFreshCount }) {
+    const base = isPremium
+      ? { trends, token_spent: tokenSpent, remaining_tokens: remainingTokens }
+      : (() => {
+          // Free tier: slot 0 is visible by default; slots 1–2 unlock via ads.
+          // lockedCount = how many ad-unlockable slots actually have data.
+          const lockedCount = Math.min(FREE_AD_UNLOCKABLE_SLOTS, Math.max(0, trends.length - 1));
+          return {
+            trends,
+            token_spent: 0,
+            unlock_more: {
+              ad_required:      lockedCount > 0,
+              trends_remaining: lockedCount,
+            },
+          };
+        })();
+
+    if (limitedResults) {
+      base.limited_results = true;
+      base.available_fresh_count = availableFreshCount;
     }
 
-    // Free tier: slot 0 is visible by default; slots 1–2 unlock via ads.
-    // lockedCount = how many ad-unlockable slots actually have data.
-    const lockedCount = Math.min(FREE_AD_UNLOCKABLE_SLOTS, Math.max(0, trends.length - 1));
-
-    return {
-      trends,
-      token_spent: 0,
-      unlock_more: {
-        ad_required:      lockedCount > 0,
-        trends_remaining: lockedCount,
-      },
-    };
+    return base;
   }
 
   // ─────────────────────────────────────────
