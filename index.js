@@ -73,6 +73,10 @@ app.set('trust proxy', 1);
 // Railway probes this endpoint to determine if the service is healthy.
 // It must never be blocked by rate limiting, auth, or any other middleware.
 app.get('/health', (req, res) => {
+
+app.get('/debug-sentry', (req, res) => {
+  throw new Error('Sentry test error - you can delete this endpoint later');
+});
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
