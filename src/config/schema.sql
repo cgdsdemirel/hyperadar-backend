@@ -115,3 +115,13 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id);
 CREATE INDEX IF NOT EXISTS idx_refresh_tokens_hash ON refresh_tokens(token_hash);
+
+-- Trend score history — snapshots for timeline visualization
+CREATE TABLE IF NOT EXISTS trend_score_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  trend_id UUID NOT NULL REFERENCES trends(id) ON DELETE CASCADE,
+  score NUMERIC NOT NULL,
+  recorded_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_trend_score_history_trend ON trend_score_history(trend_id);
+CREATE INDEX IF NOT EXISTS idx_trend_score_history_recorded ON trend_score_history(recorded_at DESC);
