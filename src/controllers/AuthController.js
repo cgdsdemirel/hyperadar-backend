@@ -1,6 +1,6 @@
 'use strict';
 
-const { DuplicateEmailError, InvalidCredentialsError } = require('../utils/errors');
+const { DuplicateEmailError, InvalidCredentialsError, InvalidTokenError } = require('../utils/errors');
 
 /**
  * AuthController — thin HTTP layer over AuthService.
@@ -29,9 +29,9 @@ async function register(req, res, next) {
     }
 
     const { authService } = req.app.locals;
-    const { user, token } = await authService.register(email, password);
+    const { user, token, refreshToken } = await authService.register(email, password);
 
-    return res.status(201).json({ user, token });
+    return res.status(201).json({ user, token, refreshToken });
   } catch (err) {
     if (err instanceof DuplicateEmailError) {
       return res.status(409).json({ error: err.message });
@@ -63,9 +63,9 @@ async function login(req, res, next) {
     }
 
     const { authService } = req.app.locals;
-    const { user, token } = await authService.login(email, password);
+    const { user, token, refreshToken } = await authService.login(email, password);
 
-    return res.status(200).json({ user, token });
+    return res.status(200).json({ user, token, refreshToken });
   } catch (err) {
     if (err instanceof InvalidCredentialsError) {
       return res.status(401).json({ error: err.message });
@@ -74,4 +74,51 @@ async function login(req, res, next) {
   }
 }
 
-module.exports = { register, login };
+/**
+ * POST /auth/refresh
+ *
+ * Body: { refreshToken }
+ * Success 200: { user, token, refreshToken }
+ * Error 400: missing refreshToken
+ * Error 401: invalid/expired refresh token
+ *
+ * Does NOT require authentication — client may hold an expired access token.
+ */
+async function refresh(req, res, next) {
+  try {
+    const { refreshToken } = req.body;
+
+    if (!refreshToken) {
+      return res.status(400).json({ error: 'refreshToken is required' });
+    }
+
+    const { authService } = req.app.locals;
+    const { accessToken, refreshToken: newRefreshToken, user } = await authService.refreshAccessToken(refreshToken);
+
+    return res.status(200).json({ user, token: accessToken, refreshToken: newRefreshToken });
+  } catch (err) {
+    if (err instanceof InvalidTokenError) {
+      return res.status(401).json({ error: err.message });
+    }
+    next(err);
+  }
+}
+
+/**
+ * POST /auth/logout
+ *
+ * Requires: Authorization: Bearer <access-token>
+ * Success 200: { message: 'Logged out successfully' }
+ */
+async function logout(req, res, next) {
+  try {
+    const { authService } = req.app.locals;
+    await authService.revokeAllRefreshTokens(req.user.id);
+
+    return res.status(200).json({ message: 'Logged out successfully' });
+  } catch (err) {
+    next(err);
+  }
+}
+
+module.exports = { register, login, refresh, logout };

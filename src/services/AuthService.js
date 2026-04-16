@@ -1,6 +1,7 @@
 'use strict';
 
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const {
   DuplicateEmailError,
@@ -9,7 +10,8 @@ const {
 } = require('../utils/errors');
 
 const SALT_ROUNDS = 12;
-const TOKEN_TTL = '7d';
+const TOKEN_TTL = '15m';
+const REFRESH_TTL = 30; // days
 
 // Basic email regex — rejects obviously malformed addresses without external deps
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -95,7 +97,8 @@ class AuthService {
     }
 
     const token = this.generateToken(user.id);
-    return { user: this._sanitize(user), token };
+    const refreshToken = await this.generateRefreshToken(user.id);
+    return { user: this._sanitize(user), token, refreshToken };
   }
 
   /**
@@ -126,7 +129,8 @@ class AuthService {
     if (!user || !match) throw new InvalidCredentialsError();
 
     const token = this.generateToken(user.id);
-    return { user: this._sanitize(user), token };
+    const refreshToken = await this.generateRefreshToken(user.id);
+    return { user: this._sanitize(user), token, refreshToken };
   }
 
   /**
@@ -151,6 +155,73 @@ class AuthService {
         err.name === 'TokenExpiredError' ? 'Token has expired' : 'Invalid token'
       );
     }
+  }
+
+  /**
+   * Generate a refresh token, persist its hash, and return the raw token.
+   * @param {string} userId
+   * @returns {Promise<string>} raw (unhashed) refresh token
+   */
+  async generateRefreshToken(userId) {
+    const token = crypto.randomBytes(40).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
+    const expiresAt = new Date(Date.now() + REFRESH_TTL * 24 * 60 * 60 * 1000);
+
+    await this.db.query(
+      `INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+       VALUES ($1, $2, $3)`,
+      [userId, tokenHash, expiresAt]
+    );
+
+    return token;
+  }
+
+  /**
+   * Exchange a valid refresh token for a new access token + rotated refresh token.
+   * @param {string} refreshToken  raw token from client
+   * @returns {Promise<{ accessToken: string, refreshToken: string, user: object }>}
+   */
+  async refreshAccessToken(refreshToken) {
+    const tokenHash = crypto.createHash('sha256').update(refreshToken).digest('hex');
+
+    const { rows } = await this.db.query(
+      `SELECT rt.id, rt.user_id, u.id AS uid, u.email, u.plan
+         FROM refresh_tokens rt
+         JOIN users u ON u.id = rt.user_id
+        WHERE rt.token_hash = $1
+          AND rt.revoked = false
+          AND rt.expires_at > NOW()`,
+      [tokenHash]
+    );
+
+    if (rows.length === 0) {
+      throw new InvalidTokenError('Invalid or expired refresh token');
+    }
+
+    const row = rows[0];
+    const user = { id: row.uid, email: row.email, plan: row.plan };
+
+    // Revoke old token before issuing new ones (rotation)
+    await this.db.query(
+      'UPDATE refresh_tokens SET revoked = true WHERE id = $1',
+      [row.id]
+    );
+
+    const accessToken = this.generateToken(user.id);
+    const newRefreshToken = await this.generateRefreshToken(user.id);
+
+    return { accessToken, refreshToken: newRefreshToken, user };
+  }
+
+  /**
+   * Revoke all active refresh tokens for a user (logout).
+   * @param {string} userId
+   */
+  async revokeAllRefreshTokens(userId) {
+    await this.db.query(
+      'UPDATE refresh_tokens SET revoked = true WHERE user_id = $1 AND revoked = false',
+      [userId]
+    );
   }
 
   // ─────────────────────────────────────────
