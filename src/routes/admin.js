@@ -4,6 +4,7 @@ const { Router } = require('express');
 const jwt        = require('jsonwebtoken');
 const logger     = require('../utils/logger');
 const { runPipeline } = require('../pipeline/pipeline');
+const { authLimiter } = require('../middleware/rateLimiter');
 
 const router = Router();
 
@@ -39,7 +40,7 @@ function adminAuth(req, res, next) {
  * Body: { email, password }
  * Returns: { token, role: 'admin' }
  */
-router.post('/login', (req, res) => {
+router.post('/login', authLimiter, (req, res) => {
   const { email, password } = req.body;
 
   if (!email || !password) {
