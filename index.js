@@ -1,4 +1,6 @@
 'use strict';
+require('./instrument');
+const Sentry = require('@sentry/node');
 
 // ─── Node.js 18 polyfill — undici requires File to be a global ───────────────
 // Remove once Railway defaults to Node 20+
@@ -25,14 +27,6 @@ process.on('unhandledRejection', (reason) => {
 // ─── Load env ─────────────────────────────────────────────────────────────────
 require('dotenv').config();
 
-// ─── Sentry (no-op if SENTRY_DSN is not set) ─────────────────────────────────
-const Sentry = require('@sentry/node');
-
-Sentry.init({
-  dsn:              process.env.SENTRY_DSN,
-  environment:      process.env.NODE_ENV || 'development',
-  tracesSampleRate: 0.1,
-});
 
 // ─── Validate env vars — warn but do NOT crash so /health always responds ─────
 const { validateEnv } = require('./src/config/env');
